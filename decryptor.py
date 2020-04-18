@@ -84,10 +84,17 @@ def decrypt():
         probablekeysizes += [keysizeresults[i]]
     print
     keychars = dict()
-    
+    keystack = dict()
+    all_size_results = ""
+    batch_text = ""
+    log_line = ""
+    print probablekeysizes
+    raw_input("Press Enter to continue to following key size...")
+
     ## Using the likely sizes, found the likeliest chars for each size then score each potential key
     for size in probablekeysizes:
-        keychars[size] = []
+        keychars[size] = dict()
+        keystack[size] = []
         print "\n--------------------\n"
         print "trying key size "+str(size)+"..."
         ## Break encrypted message into blocks of likely keysizes (size)
@@ -109,110 +116,113 @@ def decrypt():
 
         allprintable = 0 ## keep track if all characters in newblockedmessage are printable
         ## scoring single-byte xor decrypting for each new block
-        for block in newblockedmessage:
+        for idx, block in enumerate(newblockedmessage):
 
-            score = 0.0
+            #score = 0.0
             temprecord = []
+            keychars[size][idx] = []
+
+            #Evaluate all ascii printable characters range
             for i in range(127):
                 tempscore = 0.0
+
+                #xored block string
                 newstring = ''.join([chr(ord(char) ^ i) for char in block])
+                
+                #is xored block string all printable?
                 for c in newstring:
-                    if 'a'<=c<='z' or 'A'<=c<='Z' or c == ' ':
+                    #if 'a'<=c<='z' or 'A'<=c<='Z' or c == ' ':
+                    if 32 < ord(c) <=126 or ord(c) == 10:
                         tempscore += 1
+                
                 tempscore = float(tempscore) / float(len(newstring))
-                if tempscore >= score:
-                    score = tempscore
-                    temprecord = [chr(i),newblockedmessage.index(block), tempscore]
-                    for c in newstring:
-                        if 32<=ord(c)<=126 or ord(c) == 10:
-                            addprintable = 1
-                        else:
-                            addprintable = 0
-                            break
-            if addprintable == 1:
-                allprintable += len(newstring)
-            keychars[size].append(temprecord)
+
+                if tempscore == 1 :
+                    temprecord = [chr(i), idx, newstring]
+                    try:
+                        keychars[size][idx].append(temprecord)
+                        print temprecord
+                    except IndexError:
+                        if errorraised == 0:
+                            print "index error at index "+str(idx)+" out of "+str(len(blockedmessage)-1)
+                            errorraised = 1
+
+                    #backward compatibility
+                    #addprintable = tempscore
+            
+            print "-----"
+            #if addprintable == 1:
+            #    allprintable += len(newstring)
+            #keychars[size].append(temprecord)
+        
         print "\nFor keysize "+str(size)+":"
         averagescore = 0.0
-        for letter in keychars[size]:
-            print "Letter "+letter[0]+" at position "+str(letter[1])+" with score "+str(letter[2])
-            averagescore += letter[2]
-        averagescore = averagescore/size
-        if allprintable >= len(encryptedmessage): ## Advantage to keys that only produce printable characters
-            print "allprintable = "+str(allprintable)
-            print "encrypted message length = "+str(len(encryptedmessage))
-            averagescore += 10
-        print "Average Score: "+str(averagescore)
-        keychars[size].append(averagescore)
 
-    ## remove duplicate keys that are doubled, tripled, etc. ('password' vs 'passwordpassword')
-    ## and add their average score to the original
-    # print "* * *"
-    # for i in keychars.iterkeys():
-    #     print i
-    todelete = []
-    for i in keychars.iterkeys():
-        iword = ''.join([keychars[i][b][0] for b in range(0,i)])
-        for j in keychars.iterkeys():
-            jword = ''.join([keychars[j][b][0] for b in range(0,j)])
-            multiplesfound = jword.count(iword)
-            if multiplesfound > 1 and \
-            multiplesfound == float(len(jword)) / len(iword):
-                keychars[i][i] += keychars[j][j]
-                todelete.append(j)
-    # print todelete
-    for i in todelete:
-        try:
-            del keychars[i]
-        except KeyError:
-            pass # if a key is added to list more than once, and is already gone the second time it's referenced
+        #_DEBUG in this point keychars only contains best key guess        
+        #print keychars
 
+        for position, value in keychars[size].items():
+            charstack = []
+            tempstack = []
+            for letter in value:
+                #_NNA averagescore += letter[1]
+                charstack.append(letter[0])
+            
+            if position == 0:
+                keystack[size] = charstack
+            else:
+                tempstack = keystack[size]
+                keystack[size] = []
 
+                for char in charstack:
+                    for key in tempstack:
+                        keystack[size].append(key + char)
 
-    themax = max([keychars[i][i] for i in keychars.iterkeys()]) ## get highest average score among keysizes 
-    for i in keychars.iterkeys():
-        if keychars[i][i] == themax:
-            print "\n****************************************************"
-            print "Best key guess is:"
-            thekey = ''.join([keychars[i][j][0] for j in range(0,i)])
-            ## if key repeats, only show one rep
-            a = (thekey + thekey).find(thekey, 1, -1)
-            if not a == -1:
-                thekey = thekey[:a]
-            print "---> "+thekey+" <---"
-            print "With average score: "+str(keychars[i][i])
-            print "****************************************************\n"
+        print "Checking " + str(len(keystack[size])) + " possible keys. "
+        raw_input("Press Enter to continue...")
 
-    ## Use key to decrypt and display message
-    ordkey = [ord(i) for i in thekey]
-    ordmessage = [ord(i) for i in encryptedmessage]
-    keycount = 0
-    decryptedmessage = ""
-    for c in ordmessage:
-        decryptedmessage += str(chr(c ^ ordkey[keycount]))
-        keycount += 1
-        if keycount == len(ordkey):
+        for idx2, thekey in enumerate(keystack[size]):
+            if (idx2) % (len(keystack[size]) / 10) == 0 :
+                print str( (idx2) / len(keystack[size]) ) + "% : " + str(idx2) + "/" +  str(len(keystack[size]))
+
+            ordkey = [ord(i) for i in thekey]
+            ordmessage = [ord(i) for i in encryptedmessage]
             keycount = 0
+            decryptedmessage = ""
+            for c in ordmessage:
+                decryptedmessage += str(chr(c ^ ordkey[keycount]))
+                keycount += 1
+                if keycount == len(ordkey):
+                    keycount = 0
 
-    print "--------------------"
-    print "message length = "+str(len(decryptedmessage))
-    printableletters = 0
-    for c in decryptedmessage:
-        if 32<=ord(c)<=126 or ord(c) == 10:
-            printableletters += 1
-    print "printable letters = "+str(printableletters)
-    print "--------------------\n"
-    if not printableletters == len(encryptedmessage):
-        print "Decrypted message includes non-printable characters."
-        print "Keysize range may be too large, or not include correct keysize."
-        choice = ""
-        while choice != 'y' and choice != 'n':
-            choice = raw_input("Show decrypted message anyway? (y/n)").lower()
-            if choice =='y':
-                print decryptedmessage
-    else:
-        print decryptedmessage
-    print "\n****************************************************\n"
+            printableletters = 0
+
+            #performance wise if
+            if size < 3:
+                for c in decryptedmessage:
+                    if 32< ord(c)<= 126 or ord(c) == 10:
+                        printableletters += 1
+                if not printableletters == len(encryptedmessage):
+                    log_line = thekey + "\t ---- Decrypted message includes non-printable characters. \t"
+                elif not decryptedmessage == decryptedmessage.strip() :
+                    log_line = thekey + "\t ---- Decrypted message includes linebreaks > \t" + decryptedmessage.strip()
+                else:
+                    log_line = thekey + "\t ---- \t" + decryptedmessage
+            else:
+                log_line = thekey + "\t ---- \t" + decryptedmessage
+
+            log_line = log_line + "\n"
+            batch_text += log_line
+            
+        ##print batch_text    
+        all_size_results += batch_text
+        batch_text = ""
+        
+        raw_input("Press Enter to continue to following key size...")
+    
+    f1 = open('decryptor_log.txt', 'w+')
+    f1.write(all_size_results)
+    f1.close()
     main()
 
 ##########################################################
@@ -287,7 +297,8 @@ def about():
     print """
 ****************************************************
 
-Made by Joseph Bloom
+Author gl4ssiest
+Based on Joseph Bloom work
 
 This is a simple repeating-xor encryption and decryption tool. This tool is not
 meant to securely encrypt any information, and in fact shows how insecure this
